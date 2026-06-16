@@ -1,8 +1,12 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import uuid
 
+import validation
+from validation import create_error
 
 app = Flask(__name__)
+CORS(app)
 
 games = {}
 
@@ -17,22 +21,46 @@ def create_game():
 
 @app.route('/delete_game', methods=['DELETE'])
 def delete_game():
-    data = request.get_json(silent=True)
-    if not data:
-        app.logger.info(f"Malformed input provided.")
-        return jsonify({"DeletionError": "Malformed input provided"}), 400
+    app.logger.info(f"Attempting to delete game room...")
+    isValid, data, code = validation.deserialize_request_payload(app, request, ["room_id"])
+    if not isValid:
+        app.logger.info(f"Invalid input for deletion.")
+        return jsonify(data), code
+    room_id = data["room_id"]
 
-    data = dict(data)
-    room_id = data.get("room_id", None)
-    if not room_id:
-        app.logger.info(f"No room id provided for deletion")
-        return jsonify({"DeletionError": "Improper input provided"}), 400
+    app.logger.info(f"Deleting game room: {room_id}")
+    deleting_game = games.pop(room_id, None)
+    if not deleting_game:
+        app.logger.info(f"Could not delete game room: {room_id}")
+        return create_error("DeletionError", f"Could not delete game room: {room_id}"), 404
 
-    try:
-        games.pop(room_id)
-        return {"Deleted room": room_id}
-    except KeyError:
-        return jsonify({"DeletionError": f"Invalid game ID - {room_id}"}), 404
+    app.logger.info(f"Deleted game room: {room_id}")
+    return jsonify({"Deleted room": room_id}), 200
+
+
+@app.route('/join_game', methods=['POST'])
+def join_game():
+    app.logger.info(f"Attempting to join game room...")
+    isValid, data, code = validation.deserialize_request_payload(app, request, ["room_id", "player_name"])
+
+    if not isValid:
+        app.logger.info(f"Invalid input to join a game.")
+        return jsonify(data), code
+
+    player_name = data["player_name"]
+    room_id = data["room_id"]
+
+    app.logger.info(f"Adding {player_name} to room {room_id}")
+    currentGame = games.get(room_id, None)
+    if currentGame is None:
+        return create_error("JoinError", f"Invalid game ID - {room_id}"), 400
+    if len(currentGame["players"])>1:
+        return create_error("JoinError", f"Room {room_id} is full"), 400
+    if player_name in currentGame["players"]:
+        return create_error("JoinError", f"{player_name} already in game {room_id}"), 400
+    currentGame["players"].append(player_name)
+
+    return jsonify({"Players": currentGame["players"]}), 200
 
 
 if __name__ == '__main__':
