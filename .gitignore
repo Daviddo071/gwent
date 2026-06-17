@@ -28,3 +28,4 @@ lerna-debug.log*
 *.sw?
 GwentServer/__pycache__
 *.env
+**/__pycache__

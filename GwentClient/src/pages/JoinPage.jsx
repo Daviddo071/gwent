@@ -1,13 +1,62 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { io } from "socket.io-client";
 
+const socket = io(import.meta.env.VITE_SERVER_URL);
 
 function JoinPage() {
+  // State variables
+  const [playerID, setPlayerID] = useState(null);
   const [playerName, setPlayerName] = useState(null);
   const [roomCode, setRoomCode] = useState(null);
+  const [players, setPlayers] = useState([]);
   const serverURL = import.meta.env.VITE_SERVER_URL
 
+  // One time setups:
+  // Identity resotre on component mount
+  useEffect(() => {
+    const storedID = localStorage.getItem("playerID");
+    const storedName = localStorage.getItem("playerName");
+    const storedRoom = localStorage.getItem("roomCode");
 
-  const joinGame = async () => {
+    if (storedID) {
+      setPlayerID(storedID);
+    } else {
+      const newID = crypto.randomUUID();
+      setPlayerID(newID);
+      localStorage.setItem("playerID", newID);
+    }
+
+    if (storedName) setPlayerName(storedName);
+    if (storedRoom) {
+      setRoomCode(storedRoom);
+      getRoomPlayers(storedRoom);
+    }
+  }, []);
+
+  // Socket listeners
+  useEffect(() => {
+    socket.on("player_joined_game", (response) => {
+      setPlayers(response.players);
+    });
+
+    socket.on("JoinError", (response) => {
+      alert(`Failed to join game: ${response.ErrorMessage}`);
+    });
+
+    return () => {
+      socket.off("player_joined_game");
+      socket.off("JoinError");
+    };
+  }, []);
+
+  // Persist name/room when they change
+  useEffect(() => {
+    if (playerName) localStorage.setItem("playerName", playerName);
+    if (roomCode) localStorage.setItem("roomCode", roomCode);
+  }, [playerName, roomCode]);
+
+  // Callbacks
+  const joinGame = () => {
     if (playerName === null || roomCode === null) {
       alert("Please enter both your name and the room code.");
       return;
@@ -19,30 +68,31 @@ function JoinPage() {
 
     try {
       const payload = {
+        player_id: playerID,
         player_name: playerName,
         room_id: roomCode
       };
-
-      const response = await fetch(`${serverURL}/join_game`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      if (response.ok) {
-        const joinResponse = await response.json();
-        const currentPlayers = joinResponse.Players;
-        alert(`Join success, current players: ${currentPlayers}`);
-      } else {
-        const errorResponse = await response.json();
-        alert(`Failed to join game due to ${errorResponse.ErrorType} - ${errorResponse.ErrorMessage}`);
-      }
-
+      socket.emit("join_game", payload);
+      getRoomPlayers(roomCode);
     } catch (error) {
       console.error("Error joining game:", error);
     }
   }
 
+  const getRoomPlayers = async (room) => {
+    try {
+      const response = await fetch(`${serverURL}/players?room_id=${room}`);
+      if (!response.ok) {
+        // If something went wrong, assume the room DNE and remove it
+        localStorage.removeItem("roomCode");
+        return;
+      }
+      const data = await response.json();
+      setPlayers(data.players);
+    } catch (error) {
+      console.error("Error fetching player names:", error);
+    }
+  };
 
   return (
     <div style={{ textAlign: "center", marginTop: "50px" }}>
@@ -52,9 +102,11 @@ function JoinPage() {
       <button style={{ padding: "10px 20px", fontSize: "16px", marginLeft: "10px" }} onClick={joinGame}>
         Join Game
       </button>
+      {playerName && <p>Welcome, {playerName}!</p>}
+      <p>Players:</p>
+      <p>{players.join(", ")}</p>
     </div>
-
-  ); 
-
+  );
 }
+
 export default JoinPage;
