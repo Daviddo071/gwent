@@ -10,33 +10,52 @@ function JoinPage() {
   const [roomCode, setRoomCode] = useState(null);
   const [players, setPlayers] = useState([]);
   const serverURL = import.meta.env.VITE_SERVER_URL
+  const [playerJoinedGame, setPlayerJoinedGame] = useState(false);
 
   // One time setups:
-  // Identity resotre on component mount
   useEffect(() => {
-    const storedID = localStorage.getItem("playerID");
-    const storedName = localStorage.getItem("playerName");
-    const storedRoom = localStorage.getItem("roomCode");
+    const playerInRoom = async (roomID, playerID) => {
+      try {
+        const response = await fetch(`${serverURL}/player_in_room?room_id=${roomID}&player_id=${playerID}`);
+        return response.ok;
+      } catch (error) {
+        console.error("Error checking player in room:", error);
+        return false;
+      }
+    };
 
-    if (storedID) {
-      setPlayerID(storedID);
-    } else {
-      const newID = crypto.randomUUID();
-      setPlayerID(newID);
-      localStorage.setItem("playerID", newID);
-    }
+    (async () => {
+      const storedID = localStorage.getItem("playerID");
+      const storedName = localStorage.getItem("playerName");
+      const storedRoom = localStorage.getItem("roomCode");
 
-    if (storedName) setPlayerName(storedName);
-    if (storedRoom) {
-      setRoomCode(storedRoom);
-      getRoomPlayers(storedRoom);
-    }
+      let currentID = storedID;
+      if (storedID) {
+        setPlayerID(storedID);
+      } else {
+        const newID = crypto.randomUUID();
+        currentID = newID;
+        setPlayerID(newID);
+        localStorage.setItem("playerID", newID);
+      }
+
+      if (storedName) setPlayerName(storedName);
+      if (storedRoom) {
+        const isInRoom = await playerInRoom(storedRoom, currentID);
+        if (isInRoom) {
+          setRoomCode(storedRoom);
+          await getRoomPlayers(storedRoom);
+          setPlayerJoinedGame(true);
+        }
+      }
+    })();
   }, []);
 
   // Socket listeners
   useEffect(() => {
     socket.on("player_joined_game", (response) => {
       setPlayers(response.players);
+      setPlayerJoinedGame(true);
     });
 
     socket.on("JoinError", (response) => {
@@ -72,13 +91,14 @@ function JoinPage() {
         player_name: playerName,
         room_id: roomCode
       };
+      // emit join; server will add the player and emit the updated players list
       socket.emit("join_game", payload);
-      getRoomPlayers(roomCode);
     } catch (error) {
       console.error("Error joining game:", error);
     }
   }
 
+  // helper functions
   const getRoomPlayers = async (room) => {
     try {
       const response = await fetch(`${serverURL}/players?room_id=${room}`);
@@ -89,22 +109,33 @@ function JoinPage() {
       }
       const data = await response.json();
       setPlayers(data.players);
+      socket.emit("subscribe_room", { room_id: room });
     } catch (error) {
       console.error("Error fetching player names:", error);
     }
   };
 
+
   return (
     <div style={{ textAlign: "center", marginTop: "50px" }}>
       <h2>Yearning for a few rounds of cards...</h2>
-      <input type="text" placeholder="Enter your name" onChange={(e) => setPlayerName(e.target.value)} style={{ padding: "10px", fontSize: "16px" }} />
-      <input type="text" placeholder="Enter room code" onChange={(e) => setRoomCode(e.target.value)} style={{ padding: "10px", fontSize: "16px" }} />
-      <button style={{ padding: "10px 20px", fontSize: "16px", marginLeft: "10px" }} onClick={joinGame}>
-        Join Game
-      </button>
-      {playerName && <p>Welcome, {playerName}!</p>}
-      <p>Players:</p>
-      <p>{players.join(", ")}</p>
+      {playerJoinedGame ? 
+       (
+        <div>
+          <p>Players:</p>
+          <p>{players.join(", ")}</p>
+        </div>
+      ):
+      (
+        <div>
+          <input type="text" placeholder="Enter your name" onChange={(e) => setPlayerName(e.target.value)} style={{ padding: "10px", fontSize: "16px" }} />
+          <input type="text" placeholder="Enter room code" onChange={(e) => setRoomCode(e.target.value)} style={{ padding: "10px", fontSize: "16px" }} />
+          <button style={{ padding: "10px 20px", fontSize: "16px", marginLeft: "10px" }} onClick={joinGame}>
+            Join Game
+          </button>
+        </div>
+      ) }
+
     </div>
   );
 }
